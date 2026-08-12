@@ -1,0 +1,93 @@
+[project]
+name = "vespay"
+version = "0.1.0"
+description = "VesPay backend — super-app de pagos multicanal para Venezuela y LATAM."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "argon2-cffi>=23.1,<26",
+    "django>=5.2,<6.0",
+    "djangorestframework>=3.15,<4.0",
+    "drf-spectacular>=0.28,<1.0",
+    "djoser>=2.3,<3.0",
+    "djangorestframework-simplejwt>=5.4,<6.0",
+    "django-cors-headers>=4.6,<5.0",
+    "django-filter>=25.1,<26.0",
+    "django-environ>=0.12,<1.0",
+    "psycopg[binary]>=3.2,<4.0",
+    "channels[daphne]>=4.2,<5.0",
+    "channels-redis>=4.2,<5.0",
+    "celery>=5.5,<6.0",
+    "django-celery-beat>=2.7,<3.0",
+    "redis>=5.2,<7.0",
+    "django-redis>=5.4,<6.0",
+    "cryptography>=44,<47",
+    "gunicorn>=23,<24",
+    "whitenoise>=6.8,<7.0",
+    "Pillow>=11,<12",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.11,<1.0",
+    "pre-commit>=4.1,<5.0",
+    "pytest>=8.3,<9.0",
+    "pytest-django>=4.9,<5.0",
+    "pytest-cov>=6.0,<7.0",
+    "factory-boy>=3.3,<4.0",
+    "django-debug-toolbar>=5.0,<6.0",
+    "django-extensions>=4.0,<5.0",
+    "ipython>=8.29,<9.0",
+    "coverage[toml]>=7.6,<8.0",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["apps", "config", "common"]
+exclude = ["migrations", ".venv", "llm_context"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "C4", "TID"]
+ignore = [
+    "E501", # line-length lo maneja el formatter
+    "B008", # permitir llamadas en argumentos por defecto (útil en DRF)
+    "SIM105", # preferimos contextlib.suppress explícito en algunos casos
+]
+
+[tool.ruff.lint.per-file-ignores]
+"*/migrations/*.py" = ["E501", "F401", "I001"]
+"config/settings/*.py" = ["F405", "F403", "E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["apps", "common", "config"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.test"
+pythonpath = ["."]
+python_files = ["tests.py", "test_*.py", "*_tests.py"]
+addopts = "-q --strict-markers"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["apps", "common", "config"]
+omit = ["*/migrations/*", "*/tests/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+show_missing = true

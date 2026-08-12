@@ -1,0 +1,41 @@
+# Control de versiones
+.git
+.gitignore
+.idea/
+.vscode/
+
+# Entorno local
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Secretos y entorno
+.env
+.env.*
+
+# Artefactos / datos
+staticfiles/
+media/
+*.sqlite3
+
+# Tests y caché
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Documentación (no se empaqueta en la imagen)
+README.md
+llm_context/
+docs/
+
+# Docker / CI
+docker-compose.yml
+docker-compose.prod.yml
+Dockerfile
+.dockerignore
+.github/
