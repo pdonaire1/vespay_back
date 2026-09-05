@@ -44,6 +44,7 @@ LOCAL_APPS = [
     "apps.payments",
     "apps.nfc",
     "apps.widgets",
+    "apps.authentication",
     "apps.services",
 ]
 

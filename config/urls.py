@@ -12,6 +12,7 @@ urlpatterns = [
     path("api/docs/", AuthSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
     path("api/redoc/", AuthRedocView.as_view(url_name="schema"), name="redoc"),
     path("api/v1/auth/", include("apps.users.urls")),
+    path("api/auth/", include("apps.authentication.urls")),
     path("api/v1/accounts/", include("apps.accounts.urls")),
     path("api/v1/payments/", include("apps.payments.urls")),
     path("api/v1/nfc/", include("apps.nfc.urls")),

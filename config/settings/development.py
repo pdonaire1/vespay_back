@@ -27,3 +27,7 @@ REST_FRAMEWORK = {
         "rest_framework.renderers.BrowsableAPIRenderer",
     ),
 }
+
+# Dev: el cliente Flutter (web/desktop) usa puertos aleatorios — permitir todos los origenes.
+CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_CREDENTIALS = True

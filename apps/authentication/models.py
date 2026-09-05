@@ -1,0 +1,1 @@
+"""Auth endpoints reuse the custom User model defined in apps.users."""
