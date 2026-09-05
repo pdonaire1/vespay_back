@@ -1,0 +1,21 @@
+{% extends "emails/base_email.html" %}
+
+{% block subject %}Tu código de verificación VesPay{% endblock %}
+
+{% block content %}
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+    <tr>
+      <td style="text-align:center;">
+        <h1 style="margin:0 0 8px; font-size:22px; font-weight:800; color:#0B1C30;">Verifica tu correo</h1>
+        <p style="margin:0 0 24px; font-size:15px; color:#434657;">Usa este código para confirmar tu cuenta registrada con <strong style="color:#0B1C30;">{{ email }}</strong>.</p>
+
+        <div style="display:inline-block; background-color:#E5EEFF; border:2px solid #0046FF; border-radius:12px; padding:18px 32px; margin:0 0 24px; font-size:36px; font-weight:700; letter-spacing:10px; color:#0034C5; font-family:'Courier New', monospace;">
+          {{ otp_code }}
+        </div>
+
+        <p style="margin:0 0 4px; font-size:14px; color:#434657;">Este código expira en <strong style="color:#0B1C30;">15 minutos</strong>.</p>
+        <p style="margin:0; font-size:14px; color:#434657;">Si no lo solicitaste, ignora este mensaje.</p>
+      </td>
+    </tr>
+  </table>
+{% endblock %}

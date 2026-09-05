@@ -1,0 +1,9 @@
+Hola,
+
+Estamos verificando tu cuenta registrada con el correo {{ email }}.
+
+Tu código de verificación es: {{ otp_code }}
+
+Este código expira en 15 minutos. Si no lo solicitaste, ignora este mensaje.
+
+— El equipo de VesPay
