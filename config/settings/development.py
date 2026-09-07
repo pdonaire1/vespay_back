@@ -11,7 +11,6 @@ MIDDLEWARE = ["debug_toolbar.middleware.DebugToolbarMiddleware", *MIDDLEWARE]
 
 INTERNAL_IPS = ["127.0.0.1", "localhost"]
 
-EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
 # En desarrollo el backend de canales in-memory evita depender de Redis para WS
 CHANNEL_LAYERS = {"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}}
