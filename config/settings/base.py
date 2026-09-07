@@ -165,6 +165,9 @@ DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="VesPay <no-reply@vespay.
 # ── Frontend (deep links) ──────────────────────────────────────────────
 FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:3000")
 
+# ── Google SSO ───────────────────────────────────────────────────────────
+GOOGLE_WEB_CLIENT_ID = env("GOOGLE_WEB_CLIENT_ID", default="")
+
 # ── SimpleJWT ───────────────────────────────────────────────────────────
 SIMPLE_JWT = {
     "AUTH_HEADER_TYPES": ("Bearer",),

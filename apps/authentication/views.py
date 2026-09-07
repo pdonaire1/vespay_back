@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+import requests as http_requests
 from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.password_validation import validate_password
@@ -8,6 +9,9 @@ from django.core.exceptions import ValidationError
 from django.core.mail import send_mail
 from django.template.loader import render_to_string
 from django.utils import timezone
+from google.auth.exceptions import GoogleAuthError
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -85,6 +89,24 @@ def _send_password_reset_code(user) -> None:
     _dispatch_password_reset_email(user.email, code)
 
 
+def _verify_access_token(token: str) -> dict | None:
+    """Validates a Google OAuth2 access token via the tokeninfo endpoint.
+
+    Used for web clients, where google_sign_in does not expose an id_token.
+    """
+    try:
+        response = http_requests.get(
+            "https://oauth2.googleapis.com/tokeninfo",
+            params={"access_token": token},
+            timeout=10,
+        )
+    except http_requests.RequestException:
+        return None
+    if response.status_code != 200:
+        return None
+    return response.json()
+
+
 class LoginView(APIView):
     permission_classes = (AllowAny,)
 
@@ -102,6 +124,71 @@ class LoginView(APIView):
         refresh = RefreshToken.for_user(user)
         if not user.is_email_verified:
             _send_otp_code(user)
+        return Response(
+            {
+                "access": str(refresh.access_token),
+                "refresh": str(refresh),
+                "user": UserSerializer(user).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class GoogleLoginView(APIView):
+    permission_classes = (AllowAny,)
+
+    def post(self, request):
+        id_token_str = str(request.data.get("id_token", "")).strip()
+        access_token = str(request.data.get("access_token", "")).strip()
+        invalid = Response(
+            {"detail": "Invalid Google ID Token"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+        payload = None
+        if id_token_str:
+            try:
+                payload = id_token.verify_oauth2_token(
+                    id_token_str,
+                    google_requests.Request(),
+                    settings.GOOGLE_WEB_CLIENT_ID,
+                )
+            except (ValueError, GoogleAuthError):
+                return invalid
+        elif access_token:
+            payload = _verify_access_token(access_token)
+            if payload is None:
+                return invalid
+        if payload is None:
+            return invalid
+
+        email = str(payload.get("email") or "").strip().lower()
+        if not email:
+            return invalid
+
+        full_name = " ".join(
+            part
+            for part in (
+                str(payload.get("given_name") or "").strip(),
+                str(payload.get("family_name") or "").strip(),
+            )
+            if part
+        )
+        if not full_name:
+            full_name = str(payload.get("name") or "").strip()
+
+        user, _ = User.objects.get_or_create(
+            email=email,
+            defaults={
+                "full_name": full_name,
+                "is_email_verified": True,
+            },
+        )
+        if not user.is_email_verified:
+            user.is_email_verified = True
+            user.save(update_fields=["is_email_verified"])
+
+        refresh = RefreshToken.for_user(user)
         return Response(
             {
                 "access": str(refresh.access_token),
