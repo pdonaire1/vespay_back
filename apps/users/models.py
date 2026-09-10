@@ -12,8 +12,11 @@ class User(AbstractBaseUser, PermissionsMixin, TimeStampedModel):
     phone = models.CharField(max_length=20, blank=True)
     cedula = models.CharField(max_length=20, blank=True)
     is_active = models.BooleanField(default=True)
-    is_email_verified = models.BooleanField(default=False)
     is_staff = models.BooleanField(default=False)
+    is_email_verified = models.BooleanField(default=False)
+    is_2fa_enabled = models.BooleanField(default=False)
+    totp_secret = models.CharField(max_length=64, blank=True, default="")
+    backup_codes = models.JSONField(default=list, blank=True)
 
     objects = UserManager()
 

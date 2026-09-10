@@ -72,6 +72,47 @@ class GoogleLoginViewTests(APITestCase):
         response = self.client.post(reverse("google_login"), {}, format="json")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_google_created_user_has_no_usable_password(self):
+        with mock.patch(
+            "apps.authentication.views.id_token.verify_oauth2_token",
+            return_value=_fake_payload(),
+        ):
+            response = self.client.post(
+                reverse("google_login"), {"id_token": "valid-token"}, format="json"
+            )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data["user"]["has_usable_password"])
+
+    def test_legacy_sso_account_with_empty_password_is_normalized(self):
+        # Usuario creado por SSO antes del fix: password quedó en "".
+        legacy = User.objects.create(email="ana.gomez@gmail.com", password="")
+        with mock.patch(
+            "apps.authentication.views.id_token.verify_oauth2_token",
+            return_value=_fake_payload(),
+        ):
+            response = self.client.post(
+                reverse("google_login"), {"id_token": "valid-token"}, format="json"
+            )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data["user"]["has_usable_password"])
+        legacy.refresh_from_db()
+        self.assertFalse(legacy.has_usable_password())
+
+    def test_sso_account_with_real_password_keeps_it_usable(self):
+        # Usuario SSO que luego fijó una contraseña (forgot-password).
+        user = User.objects.create(email="ana.gomez@gmail.com")
+        user.set_password("realpassword123")
+        user.save(update_fields=["password"])
+        with mock.patch(
+            "apps.authentication.views.id_token.verify_oauth2_token",
+            return_value=_fake_payload(),
+        ):
+            response = self.client.post(
+                reverse("google_login"), {"id_token": "valid-token"}, format="json"
+            )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data["user"]["has_usable_password"])
+
     def test_access_token_flow_creates_user(self):
         fake_info = {
             "sub": "123",
