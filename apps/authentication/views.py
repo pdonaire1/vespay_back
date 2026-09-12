@@ -43,6 +43,27 @@ def _new_backup_codes(count: int = 8) -> list[str]:
     return [f"{secrets.token_hex(2)}-{secrets.token_hex(2)}" for _ in range(count)]
 
 
+def _cache_get(key: str, default):
+    try:
+        return cache.get(key, default)
+    except Exception:
+        return default
+
+
+def _cache_set(key: str, value, timeout: int) -> None:
+    try:
+        cache.set(key, value, timeout=timeout)
+    except Exception:
+        pass
+
+
+def _cache_delete(key: str) -> None:
+    try:
+        cache.delete(key)
+    except Exception:
+        pass
+
+
 def _dispatch_otp_email(email: str, code: str) -> None:
     context = {"otp_code": code, "email": email}
     subject = "Tu código de verificación VesPay"
@@ -455,7 +476,7 @@ class TwoFactorChallengeView(APIView):
             return invalid
 
         cache_key = f"2fa_challenge_failures:{user.pk}"
-        failures = cache.get(cache_key, 0)
+        failures = _cache_get(cache_key, 0)
         if failures >= TWO_FA_MAX_ATTEMPTS:
             return Response(
                 {"detail": "Demasiados intentos. Intenta nuevamente en 15 minutos."},
@@ -469,10 +490,10 @@ class TwoFactorChallengeView(APIView):
             valid = _consume_backup_code(user, code)
 
         if not valid:
-            cache.set(cache_key, failures + 1, timeout=TWO_FA_ATTEMPT_WINDOW)
+            _cache_set(cache_key, failures + 1, timeout=TWO_FA_ATTEMPT_WINDOW)
             return invalid
 
-        cache.delete(cache_key)
+        _cache_delete(cache_key)
         first_login = user.last_login is None
         user.last_login = timezone.now()
         user.save(update_fields=["last_login"])

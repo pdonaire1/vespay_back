@@ -30,3 +30,7 @@ REST_FRAMEWORK = {
 # Dev: el cliente Flutter (web/desktop) usa puertos aleatorios — permitir todos los origenes.
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
+
+
+# Cache en memoria para desarrollo (no requiere Redis local).
+CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
