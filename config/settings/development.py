@@ -15,6 +15,11 @@ INTERNAL_IPS = ["127.0.0.1", "localhost"]
 # En desarrollo el backend de canales in-memory evita depender de Redis para WS
 CHANNEL_LAYERS = {"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}}
 
+# Clave de cifrado por defecto en desarrollo si no hay una en .env.
+# (Producción exige definir VESPAY_ENCRYPTION_KEY.)
+if not VESPAY_ENCRYPTION_KEY:  # noqa: F405
+    VESPAY_ENCRYPTION_KEY = "dmVzcGF5LXRlc3Qta2V5LTEyMzQ1Njc4OTBhYmNkZWY="
+
 # Por defecto las tareas se encolan en Redis y las procesa el worker de docker-compose.
 # Para desarrollo local sin worker/Redis: CELERY_TASK_ALWAYS_EAGER=True en .env.
 CELERY_TASK_ALWAYS_EAGER = env.bool("CELERY_TASK_ALWAYS_EAGER", default=False)

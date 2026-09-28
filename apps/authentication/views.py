@@ -23,6 +23,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from apps.security.services import consume_action_token
 from apps.users.serializers import UserSerializer
 
 from . import tasks
@@ -86,12 +87,8 @@ def _send_otp_code(user) -> bool:
 
     Returns True if a new code was dispatched, False when throttled.
     """
-    latest = (
-        EmailVerification.objects.filter(user=user, is_used=False).order_by("-id").first()
-    )
-    if latest and latest.created_at > timezone.now() - timedelta(
-        seconds=RESEND_THROTTLE_SECONDS
-    ):
+    latest = EmailVerification.objects.filter(user=user, is_used=False).order_by("-id").first()
+    if latest and latest.created_at > timezone.now() - timedelta(seconds=RESEND_THROTTLE_SECONDS):
         return False
 
     _, code = EmailVerification.issue(user, user.email)
@@ -143,9 +140,7 @@ class LoginView(APIView):
             _send_otp_code(user)
 
         if user.is_2fa_enabled:
-            pre_auth_token = signing.dumps(
-                {"user_id": user.pk}, salt=PRE_AUTH_TOKEN_SALT
-            )
+            pre_auth_token = signing.dumps({"user_id": user.pk}, salt=PRE_AUTH_TOKEN_SALT)
             return Response(
                 {"requires_2fa": True, "pre_auth_token": pre_auth_token},
                 status=status.HTTP_202_ACCEPTED,
@@ -235,9 +230,7 @@ class GoogleLoginView(APIView):
             user.save(update_fields=["is_email_verified"])
 
         if user.is_2fa_enabled:
-            pre_auth_token = signing.dumps(
-                {"user_id": user.pk}, salt=PRE_AUTH_TOKEN_SALT
-            )
+            pre_auth_token = signing.dumps({"user_id": user.pk}, salt=PRE_AUTH_TOKEN_SALT)
             return Response(
                 {"requires_2fa": True, "pre_auth_token": pre_auth_token},
                 status=status.HTTP_202_ACCEPTED,
@@ -334,11 +327,7 @@ class VerifyOtpView(APIView):
         verification = (
             EmailVerification.objects.filter(user=user, is_used=False).order_by("-id").first()
         )
-        if (
-            verification is None
-            or verification.is_expired
-            or not verification.matches(otp_code)
-        ):
+        if verification is None or verification.is_expired or not verification.matches(otp_code):
             return invalid
 
         verification.is_used = True
@@ -361,18 +350,61 @@ class VerifyOtpView(APIView):
         )
 
 
+class CurrentUserView(APIView):
+    """Devuelve el usuario autenticado con sus flags de seguridad.
+
+    Permite al cliente sincronizar `is_2fa_enabled` / `has_usable_password`
+    tras restaurar la sesión (refresh token), sin necesidad de re-login.
+    """
+
+    def get(self, request):
+        return Response(UserSerializer(request.user).data, status=status.HTTP_200_OK)
+
+
 class ChangePasswordView(APIView):
     """Changes the password of the currently authenticated user."""
 
     def post(self, request):
         current_password = str(request.data.get("current_password", ""))
         new_password = str(request.data.get("new_password", ""))
+        code = str(request.data.get("code", "")).strip()
 
         if not request.user.check_password(current_password):
             return Response(
                 {"detail": "Current password is incorrect."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        action_token = str(request.data.get("action_token", "")).strip()
+        biometric_ok = bool(action_token and consume_action_token(request.user, action_token))
+
+        if request.user.is_2fa_enabled and not biometric_ok:
+            cache_key = f"change_password_2fa_failures:{request.user.pk}"
+            failures = _cache_get(cache_key, 0)
+            if failures >= TWO_FA_MAX_ATTEMPTS:
+                return Response(
+                    {
+                        "detail": "Demasiados intentos. Intenta nuevamente en 15 minutos.",
+                        "requires_2fa": True,
+                    },
+                    status=status.HTTP_429_TOO_MANY_REQUESTS,
+                )
+            if not code:
+                # El cliente aún no envió un código: es un sondeo, no un fallo.
+                return Response(
+                    {
+                        "detail": "Se requiere verificación en dos pasos.",
+                        "requires_2fa": True,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if not _verify_second_factor(request.user, code, allow_email=False):
+                _cache_set(cache_key, failures + 1, timeout=TWO_FA_ATTEMPT_WINDOW)
+                return Response(
+                    {"detail": "Código de verificación inválido.", "requires_2fa": True},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            _cache_delete(cache_key)
 
         try:
             validate_password(new_password, user=request.user)
@@ -398,8 +430,8 @@ class TwoFactorSetupView(APIView):
         if request.user.is_2fa_enabled:
             return Response({"message": "2FA ya está activado."}, status=400)
         secret = pyotp.random_base32()
-        request.user.totp_secret = secret
-        request.user.save(update_fields=["totp_secret"])
+        request.user.set_totp_secret(secret)
+        request.user.save(update_fields=["totp_secret_encrypted"])
         qr_uri = pyotp.TOTP(secret).provisioning_uri(
             name=request.user.email,
             issuer_name="VesPay",
@@ -415,11 +447,9 @@ class TwoFactorVerifyView(APIView):
         user = request.user
         if user.is_2fa_enabled:
             return Response({"message": "2FA ya está activado."}, status=400)
-        if not user.totp_secret:
-            return Response(
-                {"message": "Debes generar el código QR primero."}, status=400
-            )
-        if not code or not pyotp.TOTP(user.totp_secret).verify(code, valid_window=1):
+        if not user.get_totp_secret():
+            return Response({"message": "Debes generar el código QR primero."}, status=400)
+        if not code or not pyotp.TOTP(user.get_totp_secret()).verify(code, valid_window=1):
             return Response({"message": "Código inválido."}, status=400)
 
         codes = _new_backup_codes()
@@ -469,6 +499,23 @@ class TwoFactorEmailCodeView(APIView):
         )
 
 
+class TwoFactorEmailCodeCurrentView(APIView):
+    """Envía un código de acceso por correo al usuario autenticado.
+
+    Alternativa al TOTP para flujos ya autenticados (p. ej. cambiar contraseña),
+    donde no existe un `pre_auth_token` de login.
+    """
+
+    def post(self, request):
+        user = request.user
+        _, code = EmailVerification.issue(user, user.email)
+        _dispatch_otp_email(user.email, code)
+        return Response(
+            {"detail": "Se envió un código a tu correo electrónico."},
+            status=status.HTTP_200_OK,
+        )
+
+
 class TwoFactorChallengeView(APIView):
     permission_classes = (AllowAny,)
 
@@ -504,15 +551,7 @@ class TwoFactorChallengeView(APIView):
                 status=status.HTTP_429_TOO_MANY_REQUESTS,
             )
 
-        valid = False
-        if user.totp_secret and code:
-            valid = pyotp.TOTP(user.totp_secret).verify(code, valid_window=1)
-        if not valid and code:
-            valid = _consume_backup_code(user, code)
-        if not valid and code:
-            valid = _consume_email_code(user, code)
-
-        if not valid:
+        if not _verify_second_factor(user, code):
             _cache_set(cache_key, failures + 1, timeout=TWO_FA_ATTEMPT_WINDOW)
             return invalid
 
@@ -545,9 +584,7 @@ def _consume_backup_code(user, code: str) -> bool:
 
 def _consume_email_code(user, code: str) -> bool:
     verification = (
-        EmailVerification.objects.filter(user=user, is_used=False)
-        .order_by("-id")
-        .first()
+        EmailVerification.objects.filter(user=user, is_used=False).order_by("-id").first()
     )
     if verification is None or verification.is_expired or not verification.matches(code):
         return False
@@ -556,13 +593,66 @@ def _consume_email_code(user, code: str) -> bool:
     return True
 
 
+def _verify_second_factor(user, code: str, *, allow_email: bool = True) -> bool:
+    """Valida un segundo factor: TOTP, backup code o (opcional) código de correo.
+
+    Comparte la semántica de `TwoFactorChallengeView`. `allow_email=False`
+    deshabilita el fallback por correo (p. ej. en el cambio de contraseña).
+    """
+    totp_secret = user.get_totp_secret()
+    if totp_secret and code and pyotp.TOTP(totp_secret).verify(code, valid_window=1):
+        return True
+    if code and _consume_backup_code(user, code):
+        return True
+    return bool(allow_email and code and _consume_email_code(user, code))
+
+
 class TwoFactorDisableView(APIView):
+    """Desactiva el 2FA. Exige verificar el segundo factor antes de desactivarlo."""
+
     def post(self, request):
         user = request.user
-        user.totp_secret = ""
+        code = str(request.data.get("code", "")).strip()
+        action_token = str(request.data.get("action_token", "")).strip()
+
+        if user.is_2fa_enabled:
+            biometric_ok = bool(action_token and consume_action_token(user, action_token))
+            if not biometric_ok:
+                cache_key = f"disable_2fa_failures:{user.pk}"
+                failures = _cache_get(cache_key, 0)
+                if failures >= TWO_FA_MAX_ATTEMPTS:
+                    return Response(
+                        {
+                            "detail": "Demasiados intentos. Intenta nuevamente en 15 minutos.",
+                            "requires_2fa": True,
+                        },
+                        status=status.HTTP_429_TOO_MANY_REQUESTS,
+                    )
+                if not code:
+                    return Response(
+                        {
+                            "detail": "Se requiere verificación en dos pasos.",
+                            "requires_2fa": True,
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                # Aquí sí se permite el fallback por correo (el usuario podría
+                # haber perdido el authenticator y necesita desactivarlo).
+                if not _verify_second_factor(user, code, allow_email=True):
+                    _cache_set(cache_key, failures + 1, timeout=TWO_FA_ATTEMPT_WINDOW)
+                    return Response(
+                        {
+                            "detail": "Código de verificación inválido.",
+                            "requires_2fa": True,
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                _cache_delete(cache_key)
+
+        user.totp_secret_encrypted = ""
         user.is_2fa_enabled = False
         user.backup_codes = []
-        user.save(update_fields=["totp_secret", "is_2fa_enabled", "backup_codes"])
+        user.save(update_fields=["totp_secret_encrypted", "is_2fa_enabled", "backup_codes"])
         return Response({"message": "2FA desactivado."}, status=200)
 
 
@@ -601,11 +691,7 @@ class PasswordResetVerifyView(APIView):
         verification = (
             EmailVerification.objects.filter(user=user, is_used=False).order_by("-id").first()
         )
-        if (
-            verification is None
-            or verification.is_expired
-            or not verification.matches(code)
-        ):
+        if verification is None or verification.is_expired or not verification.matches(code):
             return invalid
 
         verification.is_used = True

@@ -110,6 +110,46 @@ uv run pre-commit run --all-files
 
 ---
 
+## Autenticación biométrica (WebAuthn / Passkeys)
+
+La biometría del dispositivo se valida criptográficamente en el backend (FIDO2/WebAuthn),
+no con un simple `success: true` del cliente. El dispositivo firma un *challenge* con una
+clave privada (passkey) y el backend verifica la firma con la clave pública registrada.
+
+### Variables de entorno
+
+| Variable | Descripción | Ejemplo dev |
+|----------|-------------|-------------|
+| `WEBAUTHN_RP_ID` | Relying Party ID: el dominio (sin esquema ni puerto). Debe coincidir con el dominio que sirve `assetlinks.json`/`apple-app-site-association`. | `localhost` |
+| `WEBAUTHN_RP_NAME` | Nombre visible del RP en el prompt del sistema. | `VesPay` |
+| `WEBAUTHN_ORIGIN` | Origin exacto de la app (esquema + host + puerto). En producción debe ser HTTPS. | `http://localhost:3000` |
+
+### Endpoints (autenticados con JWT) bajo `/api/v1/security/`
+
+| Endpoint | Descripción |
+|----------|-------------|
+| `POST biometric/register/` | Devuelve las opciones de registro del passkey. |
+| `POST biometric/register/verify/` | Valida la attestation y guarda la clave pública. |
+| `POST biometric/challenge/` | Emite un challenge (nonce, TTL 60s) para firmar. |
+| `POST biometric/verify/` | Valida la firma y emite un `action_token` (TTL 5 min, single-use). |
+
+El `action_token` autoriza acciones de alto riesgo (p. ej. cambiar la contraseña) en lugar
+de un código 2FA. Los challenges y tokens viven en Redis con expiración y se consumen una
+sola vez (anti-replay).
+
+### Requisitos de plataforma
+
+- **Android**: servir `https://<RP_ID>/.well-known/assetlinks.json` con el `package_name`
+  y los SHA-256 del certificado de firma.
+- **iOS/macOS**: servir `https://<RP_ID>/.well-known/apple-app-site-association` y añadir el
+  entitlement Associated Domains (`webcredentials:<RP_ID>`).
+- **Web**: incluir el script JS de `passkeys_web` en `web/index.html`; el RP ID debe
+  coincidir con el hostname servido.
+- En **desarrollo** con `RP_ID=localhost` los passkeys funcionan en web sobre `localhost`
+  (contexto seguro). En dispositivos físicos se requiere el domain verification anterior.
+
+---
+
 ## Despliegue en producción
 
 ### 1. Variables de entorno (obligatorias)

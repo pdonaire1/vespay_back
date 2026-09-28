@@ -3,6 +3,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 
 from .views import (
     ChangePasswordView,
+    CurrentUserView,
     GoogleLoginView,
     LoginView,
     PasswordResetConfirmView,
@@ -12,6 +13,7 @@ from .views import (
     ResendOtpView,
     TwoFactorChallengeView,
     TwoFactorDisableView,
+    TwoFactorEmailCodeCurrentView,
     TwoFactorEmailCodeView,
     TwoFactorSetupView,
     TwoFactorVerifyView,
@@ -19,6 +21,7 @@ from .views import (
 )
 
 urlpatterns = [
+    path("me/", CurrentUserView.as_view(), name="auth_me"),
     path("login/", LoginView.as_view(), name="auth_login"),
     path("register/", RegisterView.as_view(), name="auth_register"),
     path("google/", GoogleLoginView.as_view(), name="google_login"),
@@ -33,6 +36,11 @@ urlpatterns = [
         "2fa/send-email-code/",
         TwoFactorEmailCodeView.as_view(),
         name="auth_2fa_send_email_code",
+    ),
+    path(
+        "2fa/send-email-code/current/",
+        TwoFactorEmailCodeCurrentView.as_view(),
+        name="auth_2fa_send_email_code_current",
     ),
     path("2fa/disable/", TwoFactorDisableView.as_view(), name="auth_2fa_disable"),
     path(

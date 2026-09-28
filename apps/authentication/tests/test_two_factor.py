@@ -2,18 +2,19 @@ import pyotp
 from unittest import mock
 
 from django.contrib.auth import get_user_model
+from django.core import mail
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
+
+from apps.authentication.models import EmailVerification
 
 User = get_user_model()
 
 
 class TwoFactorTests(APITestCase):
     def setUp(self):
-        self.user = User.objects.create_user(
-            email="user@vespay.com", password="securepassword123"
-        )
+        self.user = User.objects.create_user(email="user@vespay.com", password="securepassword123")
         # Los usuarios con 2FA ya verificaron el correo.
         self.user.is_email_verified = True
         self.user.save(update_fields=["is_email_verified"])
@@ -24,9 +25,7 @@ class TwoFactorTests(APITestCase):
         assert setup.status_code == 200
         secret = setup.data["secret"]
         code = pyotp.TOTP(secret).now()
-        verify = self.client.post(
-            reverse("auth_2fa_verify"), {"code": code}, format="json"
-        )
+        verify = self.client.post(reverse("auth_2fa_verify"), {"code": code}, format="json")
         self.assertEqual(verify.status_code, status.HTTP_200_OK)
         self.user.refresh_from_db()
         self.assertTrue(self.user.is_2fa_enabled)
@@ -178,3 +177,35 @@ class TwoFactorTests(APITestCase):
                 format="json",
             )
         self.assertIn("code", captured)
+
+
+class TotpSecretEncryptionTests(APITestCase):
+    def test_secret_is_stored_encrypted(self):
+        user = User.objects.create_user(email="enc@vespay.com", password="securepassword123")
+        secret = pyotp.random_base32()
+
+        user.set_totp_secret(secret)
+        user.save(update_fields=["totp_secret_encrypted"])
+        user.refresh_from_db()
+
+        self.assertTrue(user.totp_secret_encrypted)
+        self.assertNotIn(secret, user.totp_secret_encrypted)
+        self.assertEqual(user.get_totp_secret(), secret)
+
+
+class TwoFactorEmailCodeCurrentTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(email="user@vespay.com", password="securepassword123")
+        self.url = reverse("auth_2fa_send_email_code_current")
+
+    def test_requires_authentication(self):
+        response = self.client.post(self.url, {}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_sends_email_code_to_authenticated_user(self):
+        self.client.force_authenticate(self.user)
+        response = self.client.post(self.url, {}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(EmailVerification.objects.filter(user=self.user, is_used=False).exists())
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, [self.user.email])

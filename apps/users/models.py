@@ -2,6 +2,7 @@ from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.db import models
 
 from common.models import TimeStampedModel
+from common.utils.crypto import decrypt_field, encrypt_field
 
 from .managers import UserManager
 
@@ -15,7 +16,8 @@ class User(AbstractBaseUser, PermissionsMixin, TimeStampedModel):
     is_staff = models.BooleanField(default=False)
     is_email_verified = models.BooleanField(default=False)
     is_2fa_enabled = models.BooleanField(default=False)
-    totp_secret = models.CharField(max_length=64, blank=True, default="")
+    # Secreto TOTP cifrado en reposo (AES-256-GCM). Ver set/get_totp_secret().
+    totp_secret_encrypted = models.TextField(blank=True, default="")
     backup_codes = models.JSONField(default=list, blank=True)
 
     objects = UserManager()
@@ -35,3 +37,21 @@ class User(AbstractBaseUser, PermissionsMixin, TimeStampedModel):
 
     def get_short_name(self) -> str:
         return self.full_name.split(" ")[0] or self.email
+
+    def set_totp_secret(self, secret: str) -> None:
+        """Guarda el secreto TOTP cifrado (cadena vacía lo limpia)."""
+        self.totp_secret_encrypted = encrypt_field(secret) if secret else ""
+
+    def get_totp_secret(self) -> str:
+        if not self.totp_secret_encrypted:
+            return ""
+        return decrypt_field(self.totp_secret_encrypted)
+
+    # Compatibilidad con el acceso directo previo (texto plano).
+    @property
+    def totp_secret(self) -> str:
+        return self.get_totp_secret()
+
+    @totp_secret.setter
+    def totp_secret(self, secret: str) -> None:
+        self.set_totp_secret(secret)
