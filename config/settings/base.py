@@ -45,6 +45,7 @@ LOCAL_APPS = [
     "apps.nfc",
     "apps.widgets",
     "apps.authentication",
+    "apps.security",
     "apps.services",
 ]
 
@@ -124,6 +125,11 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
+
+# ── Email: logo inline (CID) ────────────────────────────────────────────
+EMAIL_LOGO_PATH = BASE_DIR / "templates" / "emails" / "assets" / "vespay_logo_long.png"
+EMAIL_LOGO_CID = "vespay-logo"
+
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
@@ -167,6 +173,12 @@ FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:3000")
 
 # ── Google SSO ───────────────────────────────────────────────────────────
 GOOGLE_WEB_CLIENT_ID = env("GOOGLE_WEB_CLIENT_ID", default="")
+
+# ── WebAuthn / Passkeys (biometría) ─────────────────────────────────────
+# El RP ID debe coincidir con el dominio que sirve assetlinks.json / AASA.
+WEBAUTHN_RP_ID = env("WEBAUTHN_RP_ID", default="localhost")
+WEBAUTHN_RP_NAME = env("WEBAUTHN_RP_NAME", default="VesPay")
+WEBAUTHN_ORIGIN = env("WEBAUTHN_ORIGIN", default="http://localhost:3000")
 
 # ── SimpleJWT ───────────────────────────────────────────────────────────
 SIMPLE_JWT = {

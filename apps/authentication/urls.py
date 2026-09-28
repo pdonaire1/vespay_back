@@ -12,6 +12,7 @@ from .views import (
     ResendOtpView,
     TwoFactorChallengeView,
     TwoFactorDisableView,
+    TwoFactorEmailCodeView,
     TwoFactorSetupView,
     TwoFactorVerifyView,
     VerifyOtpView,
@@ -28,6 +29,11 @@ urlpatterns = [
     path("2fa/setup/", TwoFactorSetupView.as_view(), name="auth_2fa_setup"),
     path("2fa/verify/", TwoFactorVerifyView.as_view(), name="auth_2fa_verify"),
     path("2fa/challenge/", TwoFactorChallengeView.as_view(), name="auth_2fa_challenge"),
+    path(
+        "2fa/send-email-code/",
+        TwoFactorEmailCodeView.as_view(),
+        name="auth_2fa_send_email_code",
+    ),
     path("2fa/disable/", TwoFactorDisableView.as_view(), name="auth_2fa_disable"),
     path(
         "password-reset/request/",

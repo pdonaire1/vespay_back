@@ -15,6 +15,10 @@ WORKDIR /app
 # ── Etapa de build (resuelve e instala dependencias con uv) ─────────────
 FROM base AS builder
 
+# INSTALL_DEV=true incluye el grupo dev (debug_toolbar, django_extensions, etc.)
+# para poder usar config.settings.development dentro del contenedor.
+ARG INSTALL_DEV=false
+
 COPY --from=ghcr.io/astral-sh/uv:0.12.3 /uv /uvx /bin/
 
 ENV UV_COMPILE_BYTECODE=1 \
@@ -22,11 +26,11 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 COPY pyproject.toml uv.lock ./
 
-RUN uv sync --frozen --no-dev --no-install-project
+RUN uv sync --frozen $([ "$INSTALL_DEV" = "true" ] || echo "--no-dev") --no-install-project
 
 COPY . .
 
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen $([ "$INSTALL_DEV" = "true" ] || echo "--no-dev")
 
 # ── Etapa de runtime ────────────────────────────────────────────────────
 FROM base AS runtime

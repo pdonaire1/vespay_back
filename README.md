@@ -196,3 +196,15 @@ Generada con `drf-spectacular`:
 | GET | `/api/redoc/` | ReDoc (requiere autenticación: sesión de admin o JWT) |
 
 Para más detalle de dominio (Matchmaking, Fee Engine, flujo NFC), consulta `AGENTS.md` y `llm_context/`.
+
+# Run Workers Celery Tasks
+Install redis and redis-server
+```
+  $ redis-server
+  # Watch and get information about celery workers:
+  $ celery -A config worker -l INFO
+  # as a separate command line
+  $ celery -A config beat -l INFO --scheduler django_celery_beat.schedulers:DatabaseScheduler
+  # Celery workers help:
+  $ celery worker --help
+```

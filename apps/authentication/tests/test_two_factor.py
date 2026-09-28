@@ -1,4 +1,6 @@
 import pyotp
+from unittest import mock
+
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 from rest_framework import status
@@ -12,6 +14,9 @@ class TwoFactorTests(APITestCase):
         self.user = User.objects.create_user(
             email="user@vespay.com", password="securepassword123"
         )
+        # Los usuarios con 2FA ya verificaron el correo.
+        self.user.is_email_verified = True
+        self.user.save(update_fields=["is_email_verified"])
         self.client.force_authenticate(self.user)
 
     def _enable_2fa(self) -> list[str]:
@@ -120,3 +125,56 @@ class TwoFactorTests(APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
+    def test_email_code_alternative_works(self):
+        self._enable_2fa()
+        token = self._login_after_2fa().data["pre_auth_token"]
+
+        captured = {}
+        with mock.patch(
+            "apps.authentication.views._dispatch_otp_email",
+            side_effect=lambda email, code: captured.__setitem__("code", code),
+        ):
+            sent = self.client.post(
+                reverse("auth_2fa_send_email_code"),
+                {"pre_auth_token": token},
+                format="json",
+            )
+        self.assertEqual(sent.status_code, status.HTTP_200_OK)
+        self.assertIn("code", captured)
+
+        challenge = self.client.post(
+            reverse("auth_2fa_challenge"),
+            {"pre_auth_token": token, "code": captured["code"]},
+            format="json",
+        )
+        self.assertEqual(challenge.status_code, status.HTTP_200_OK)
+        self.assertIn("access", challenge.data)
+
+    def test_email_code_alternative_rejects_invalid_pre_auth_token(self):
+        response = self.client.post(
+            reverse("auth_2fa_send_email_code"),
+            {"pre_auth_token": "garbage"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_email_code_is_sent_even_with_recent_pending_otp(self):
+        from apps.authentication.models import EmailVerification
+
+        self._enable_2fa()
+        token = self._login_after_2fa().data["pre_auth_token"]
+        # Simula una OTP reciente pendiente (throttle de otros flujos).
+        EmailVerification.issue(self.user, self.user.email)
+
+        captured = {}
+        with mock.patch(
+            "apps.authentication.views._dispatch_otp_email",
+            side_effect=lambda email, code: captured.__setitem__("code", code),
+        ):
+            self.client.post(
+                reverse("auth_2fa_send_email_code"),
+                {"pre_auth_token": token},
+                format="json",
+            )
+        self.assertIn("code", captured)

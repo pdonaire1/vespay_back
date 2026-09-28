@@ -16,4 +16,7 @@ EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
 
 CHANNEL_LAYERS = {"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}}
 
+# Cache en memoria: aísla los tests entre ejecuciones (no comparte Redis).
+CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
+
 CELERY_TASK_ALWAYS_EAGER = True

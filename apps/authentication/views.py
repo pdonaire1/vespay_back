@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 import hashlib
+import logging
 import secrets
 
 import pyotp
@@ -12,8 +13,6 @@ from django.contrib.auth.password_validation import validate_password
 from django.core import signing
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
-from django.core.mail import send_mail
-from django.template.loader import render_to_string
 from django.utils import timezone
 from google.auth.exceptions import GoogleAuthError
 from google.auth.transport import requests as google_requests
@@ -26,10 +25,13 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.users.serializers import UserSerializer
 
+from . import tasks
 from .models import RESEND_THROTTLE_SECONDS, EmailVerification
 from .serializers import RegisterSerializer
 
 User = get_user_model()
+
+logger = logging.getLogger(__name__)
 
 PASSWORD_RESET_TOKEN_MAX_AGE = 60 * 15  # segundos
 PASSWORD_RESET_TOKEN_SALT = "vespay.password.reset"
@@ -65,37 +67,18 @@ def _cache_delete(key: str) -> None:
 
 
 def _dispatch_otp_email(email: str, code: str) -> None:
-    context = {"otp_code": code, "email": email}
-    subject = "Tu código de verificación VesPay"
-    text_message = render_to_string("emails/otp_code.txt", context)
-    html_message = render_to_string("emails/otp_code.html", context)
-    send_mail(
-        subject,
-        text_message,
-        settings.DEFAULT_FROM_EMAIL,
-        [email],
-        html_message=html_message,
-        fail_silently=False,
-    )
+    try:
+        tasks.send_verification_otp_email.delay(email, code)
+    except Exception:
+        # Un broker caído no debe romper el flujo del usuario; podrá pedir reenvío.
+        logger.exception("No se pudo encolar el correo OTP para %s", email)
 
 
 def _dispatch_password_reset_email(email: str, code: str) -> None:
-    reset_link = (
-        f"{settings.FRONTEND_URL.rstrip('/')}/#/auth/verify-otp"
-        f"?email={email}&mode=reset&code={code}"
-    )
-    context = {"otp_code": code, "email": email, "reset_link": reset_link}
-    subject = "Restablece tu contraseña VesPay"
-    text_message = render_to_string("emails/password_reset_code.txt", context)
-    html_message = render_to_string("emails/password_reset_code.html", context)
-    send_mail(
-        subject,
-        text_message,
-        settings.DEFAULT_FROM_EMAIL,
-        [email],
-        html_message=html_message,
-        fail_silently=False,
-    )
+    try:
+        tasks.send_password_reset_email.delay(email, code)
+    except Exception:
+        logger.exception("No se pudo encolar el correo de reset para %s", email)
 
 
 def _send_otp_code(user) -> bool:
@@ -448,6 +431,44 @@ class TwoFactorVerifyView(APIView):
         )
 
 
+class TwoFactorEmailCodeView(APIView):
+    """Envía un código de acceso por correo como alternativa al TOTP."""
+
+    permission_classes = (AllowAny,)
+
+    def post(self, request):
+        token = str(request.data.get("pre_auth_token", "")).strip()
+        invalid = Response(
+            {"detail": "Código inválido o expirado."},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+        user = None
+        if token:
+            try:
+                payload = signing.loads(
+                    token,
+                    salt=PRE_AUTH_TOKEN_SALT,
+                    max_age=PRE_AUTH_TOKEN_MAX_AGE,
+                )
+                uid = payload.get("user_id")
+                if isinstance(uid, int):
+                    user = User.objects.filter(id=uid).first()
+            except (signing.BadSignature, signing.SignatureExpired):
+                user = None
+        if user is None:
+            return invalid
+
+        # Siempre se envía un código nuevo: es una acción explícita del usuario
+        # y no debe silenciarse por el throttling compartido con otras OTP.
+        _, code = EmailVerification.issue(user, user.email)
+        _dispatch_otp_email(user.email, code)
+        return Response(
+            {"detail": "Se envió un código a tu correo electrónico."},
+            status=status.HTTP_200_OK,
+        )
+
+
 class TwoFactorChallengeView(APIView):
     permission_classes = (AllowAny,)
 
@@ -488,6 +509,8 @@ class TwoFactorChallengeView(APIView):
             valid = pyotp.TOTP(user.totp_secret).verify(code, valid_window=1)
         if not valid and code:
             valid = _consume_backup_code(user, code)
+        if not valid and code:
+            valid = _consume_email_code(user, code)
 
         if not valid:
             _cache_set(cache_key, failures + 1, timeout=TWO_FA_ATTEMPT_WINDOW)
@@ -517,6 +540,19 @@ def _consume_backup_code(user, code: str) -> bool:
         return False
     user.backup_codes = [c for c in codes if c != code_hash]
     user.save(update_fields=["backup_codes"])
+    return True
+
+
+def _consume_email_code(user, code: str) -> bool:
+    verification = (
+        EmailVerification.objects.filter(user=user, is_used=False)
+        .order_by("-id")
+        .first()
+    )
+    if verification is None or verification.is_expired or not verification.matches(code):
+        return False
+    verification.is_used = True
+    verification.save(update_fields=["is_used"])
     return True
 
 
